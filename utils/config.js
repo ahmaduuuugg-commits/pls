@@ -10,10 +10,10 @@ const config = {
     ROOM_NAME: process.env.ROOM_NAME || '🎮 RHL TOURNAMENT 🎮',
     MAX_PLAYERS: parseInt(process.env.MAX_PLAYERS) || 16,
     
-    // Geographic settings
-    GEO_CODE: process.env.GEO_CODE || 'eg',
-    GEO_LAT: parseFloat(process.env.GEO_LAT) || 30.0444,
-    GEO_LON: parseFloat(process.env.GEO_LON) || 31.2357,
+    // Geographic settings - Try Turkey for better connectivity
+    GEO_CODE: process.env.GEO_CODE || 'tr',
+    GEO_LAT: parseFloat(process.env.GEO_LAT) || 41.0082,
+    GEO_LON: parseFloat(process.env.GEO_LON) || 28.9784,
     
     // Discord configuration
     DISCORD_WEBHOOK: process.env.DISCORD_WEBHOOK || 'https://canary.discord.com/api/webhooks/1406959936851939379/Bla-hWfT8-lC5U9gXxouT9GA2W0Txltpnv4CrgzYvArO2mqMr_WaUkBA-TsYs3GrTXDT',
