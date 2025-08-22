@@ -66,9 +66,59 @@ let gameState = {
 };
 
 // ==================== Room Initialization ====================
+console.log('🔍 Starting room initialization...');
+console.log('Token length:', ROOM_CONFIG.token ? ROOM_CONFIG.token.length : 'NO TOKEN');
+console.log('Room name:', ROOM_CONFIG.roomName);
+console.log('Geo location:', ROOM_CONFIG.geo);
+
+window.hbInitCalled = false;
+
+// Check if HBInit is available
+if (typeof HBInit === 'undefined') {
+    console.error('❌ HBInit function is not available!');
+    window.initErrors = window.initErrors || [];
+    window.initErrors.push('HBInit function not found');
+    throw new Error('HBInit function not available');
+}
+
+console.log('✅ HBInit function is available');
+
 try {
+    console.log('🚀 Calling HBInit with config...');
+    console.log('Config details:', {
+        roomName: ROOM_CONFIG.roomName,
+        maxPlayers: ROOM_CONFIG.maxPlayers,
+        public: ROOM_CONFIG.public,
+        geo: ROOM_CONFIG.geo,
+        tokenPresent: !!ROOM_CONFIG.token,
+        tokenLength: ROOM_CONFIG.token ? ROOM_CONFIG.token.length : 0,
+        tokenStart: ROOM_CONFIG.token ? ROOM_CONFIG.token.substring(0, 10) + '...' : 'NO TOKEN'
+    });
+    
+    window.hbInitCalled = true;
+    
+    // Try HBInit and capture any errors
+    const startTime = Date.now();
     room = HBInit(ROOM_CONFIG);
-    console.log("✅ Room initialized successfully");
+    const endTime = Date.now();
+    
+    console.log(`⏱️ HBInit took ${endTime - startTime}ms`);
+    
+    if (room) {
+        console.log("✅ Room object created successfully!");
+        console.log("Room details:", {
+            name: room.name || 'no name',
+            playerCount: room.getPlayerList ? room.getPlayerList().length : 'no getPlayerList method',
+            hasOnPlayerJoin: typeof room.onPlayerJoin === 'function'
+        });
+        
+        // Make room available globally
+        window.room = room;
+    } else {
+        console.error("❌ HBInit returned null/undefined");
+        window.initErrors = window.initErrors || [];
+        window.initErrors.push('HBInit returned null');
+    }
     
     // Send initial Discord notification
     sendDiscordWebhook({
