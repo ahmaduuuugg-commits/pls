@@ -80,7 +80,12 @@ async function initBrowser() {
             '--ignore-certificate-errors',
             '--ignore-ssl-errors',
             '--ignore-certificate-errors-spki-list',
-            '--ignore-certificate-errors-ssl-errors'
+            '--ignore-certificate-errors-ssl-errors',
+            // Additional network settings
+            '--disable-background-networking',
+            '--enable-features=NetworkService,NetworkServiceLogging',
+            '--disable-ipc-flooding-protection',
+            '--force-webrtc-ip-handling-policy=default'
         ];
 
         // Additional args for Render environment
@@ -106,8 +111,17 @@ async function initBrowser() {
     }
 }
 
-// Create new page and setup Haxball room
-async function createHaxballRoom() {
+// Geographic fallback locations
+const GEO_LOCATIONS = [
+    { code: 'tr', lat: 41.0082, lon: 28.9784, name: 'Turkey - Istanbul' },
+    { code: 'de', lat: 52.5200, lon: 13.4050, name: 'Germany - Berlin' }, 
+    { code: 'nl', lat: 52.3676, lon: 4.9041, name: 'Netherlands - Amsterdam' },
+    { code: 'eg', lat: 30.0444, lon: 31.2357, name: 'Egypt - Cairo' },
+    { code: 'ae', lat: 25.2048, lon: 55.2708, name: 'UAE - Dubai' }
+];
+
+// Create new page and setup Haxball room with location fallback
+async function createHaxballRoom(locationIndex = 0) {
     try {
         logger.info('Creating new Haxball room...');
         
@@ -187,6 +201,18 @@ async function createHaxballRoom() {
         }
         
         logger.info('WebRTC test passed - connection candidates found');
+        
+        // Test Haxball API accessibility
+        try {
+            const haxballTest = await page.evaluate(() => {
+                return fetch('https://www.haxball.com/headlesstoken', { method: 'GET' })
+                    .then(response => response.status)
+                    .catch(err => 'network_error');
+            });
+            logger.info(`Haxball API test result: ${haxballTest}`);
+        } catch (error) {
+            logger.warn('Could not test Haxball API accessibility:', error.message);
+        }
 
         // Load tournament script
         const tournamentScript = fs.readFileSync(path.join(__dirname, 'scripts/haxball-tournament.js'), 'utf8');
@@ -197,16 +223,20 @@ async function createHaxballRoom() {
         // Log before replacements
         logger.info('Configuring tournament script with environment variables');
         
+        // Use current location or fallback
+        const currentLocation = GEO_LOCATIONS[locationIndex] || GEO_LOCATIONS[0];
+        logger.info(`Attempting room creation with location: ${currentLocation.name}`);
+        
         // Replace process.env references systematically
         const replacements = [
             { pattern: /process\.env\.ROOM_NAME/g, value: `"${config.ROOM_NAME}"` },
             { pattern: /parseInt\(process\.env\.MAX_PLAYERS\)/g, value: config.MAX_PLAYERS },
             { pattern: /process\.env\.MAX_PLAYERS/g, value: config.MAX_PLAYERS },
-            { pattern: /process\.env\.GEO_CODE/g, value: `"${config.GEO_CODE}"` },
-            { pattern: /parseFloat\(process\.env\.GEO_LAT\)/g, value: config.GEO_LAT },
-            { pattern: /process\.env\.GEO_LAT/g, value: config.GEO_LAT },
-            { pattern: /parseFloat\(process\.env\.GEO_LON\)/g, value: config.GEO_LON },
-            { pattern: /process\.env\.GEO_LON/g, value: config.GEO_LON },
+            { pattern: /process\.env\.GEO_CODE/g, value: `"${currentLocation.code}"` },
+            { pattern: /parseFloat\(process\.env\.GEO_LAT\)/g, value: currentLocation.lat },
+            { pattern: /process\.env\.GEO_LAT/g, value: currentLocation.lat },
+            { pattern: /parseFloat\(process\.env\.GEO_LON\)/g, value: currentLocation.lon },
+            { pattern: /process\.env\.GEO_LON/g, value: currentLocation.lon },
             { pattern: /process\.env\.HAXBALL_TOKEN/g, value: `"${config.HAXBALL_TOKEN}"` },
             { pattern: /process\.env\.DISCORD_WEBHOOK/g, value: `"${config.DISCORD_WEBHOOK}"` },
             { pattern: /process\.env\.DISCORD_CHANNEL_ID/g, value: `"${config.DISCORD_CHANNEL_ID}"` },
@@ -231,10 +261,99 @@ async function createHaxballRoom() {
             configuredScript = configuredScript.replace(/process\.env/g, '{}');
         }
 
-        // Inject tournament script
-        await page.evaluate(configuredScript);
+        // Add console event listeners
+        page.on('console', (msg) => {
+            const type = msg.type();
+            const text = msg.text();
+            if (type === 'error') {
+                logger.error(`Browser Console ERROR: ${text}`);
+            } else if (type === 'log') {
+                logger.info(`Browser Console LOG: ${text}`);
+            } else if (type === 'warn') {
+                logger.warn(`Browser Console WARN: ${text}`);
+            }
+        });
+        
+        page.on('pageerror', (error) => {
+            logger.error('Page Error:', error.message);
+        });
+        
+        // Add error capturing before script injection
+        await page.evaluateOnNewDocument(() => {
+            window.initErrors = [];
+            window.console.logs = [];
+        });
+        
+        // Inject tournament script and capture room link
+        const roomResult = await page.evaluate(configuredScript);
         
         logger.info('Tournament script injected successfully');
+        
+        // Wait for room creation with better debugging
+        logger.info('Waiting for room initialization...');
+        
+        const roomInitialized = await page.waitForFunction(() => {
+            // Add debugging information to window
+            window.debugInfo = {
+                roomExists: typeof window.room !== 'undefined',
+                roomType: typeof window.room,
+                hasGetPlayerList: window.room && typeof window.room.getPlayerList === 'function',
+                roomObject: window.room ? 'room object exists' : 'no room object',
+                errors: window.initErrors || [],
+                hbInitCalled: window.hbInitCalled || false
+            };
+            
+            return window.room && typeof window.room.getPlayerList === 'function';
+        }, { timeout: 20000 }).catch(async () => {
+            // Get debug info if timeout occurs
+            const debugInfo = await page.evaluate(() => window.debugInfo || {});
+            logger.error('Room initialization timeout. Debug info:', debugInfo);
+            
+            // Try to get any console errors
+            const consoleErrors = await page.evaluate(() => {
+                return window.console.logs || [];
+            });
+            if (consoleErrors.length > 0) {
+                logger.error('Console errors:', consoleErrors);
+            }
+            
+            return false;
+        });
+        
+        // Only proceed if room was initialized
+        if (!roomInitialized) {
+            throw new Error('Room initialization failed - timeout exceeded');
+        }
+        
+        // Get room link
+        const roomLink = await page.evaluate(() => {
+            try {
+                return window.location.href || 'No room link available';
+            } catch (error) {
+                return 'Error getting room link: ' + error.message;
+            }
+        });
+        
+        logger.info('Room link:', roomLink);
+        
+        // Test if room is actually accessible
+        const roomTest = await page.evaluate(() => {
+            try {
+                if (window.room && window.room.getPlayerList) {
+                    const players = window.room.getPlayerList();
+                    return {
+                        playersCount: players.length,
+                        roomName: window.room.name || 'Unknown',
+                        success: true
+                    };
+                }
+                return { success: false, error: 'Room not initialized' };
+            } catch (error) {
+                return { success: false, error: error.message };
+            }
+        });
+        
+        logger.info('Room test result:', roomTest);
 
         // Setup heartbeat monitoring
         await setupHeartbeatMonitoring();
@@ -249,7 +368,15 @@ async function createHaxballRoom() {
         logger.info('Haxball room created and monitoring started');
         
     } catch (error) {
-        logger.error('Failed to create Haxball room:', error);
+        logger.error(`Failed to create Haxball room with ${GEO_LOCATIONS[locationIndex]?.name || 'default location'}:`, error);
+        
+        // Try next location if available
+        if (locationIndex < GEO_LOCATIONS.length - 1) {
+            logger.info(`Trying next location (${locationIndex + 1}/${GEO_LOCATIONS.length})...`);
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            return createHaxballRoom(locationIndex + 1);
+        }
+        
         throw error;
     }
 }
