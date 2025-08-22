@@ -191,13 +191,45 @@ async function createHaxballRoom() {
         // Load tournament script
         const tournamentScript = fs.readFileSync(path.join(__dirname, 'scripts/haxball-tournament.js'), 'utf8');
         
-        // Replace config values with environment variables
-        const configuredScript = tournamentScript
-            .replace('thr1.AAAAAGiiB9wGRHVJ7oMR6g.RThbhoe2xHc', config.HAXBALL_TOKEN)
-            .replace('https://canary.discord.com/api/webhooks/1406959936851939379/Bla-hWfT8-lC5U9gXxouT9GA2W0Txltpnv4CrgzYvArO2mqMr_WaUkBA-TsYs3GrTXDT', config.DISCORD_WEBHOOK)
-            .replace('https://discord.gg/R3Rtwqqhwm', config.DISCORD_INVITE)
-            .replace('opopop', config.OWNER_PASSWORD)
-            .replace('🎮 RHL TOURNAMENT 🎮', config.ROOM_NAME);
+        // Replace all process.env references with actual values
+        let configuredScript = tournamentScript;
+        
+        // Log before replacements
+        logger.info('Configuring tournament script with environment variables');
+        
+        // Replace process.env references systematically
+        const replacements = [
+            { pattern: /process\.env\.ROOM_NAME/g, value: `"${config.ROOM_NAME}"` },
+            { pattern: /parseInt\(process\.env\.MAX_PLAYERS\)/g, value: config.MAX_PLAYERS },
+            { pattern: /process\.env\.MAX_PLAYERS/g, value: config.MAX_PLAYERS },
+            { pattern: /process\.env\.GEO_CODE/g, value: `"${config.GEO_CODE}"` },
+            { pattern: /parseFloat\(process\.env\.GEO_LAT\)/g, value: config.GEO_LAT },
+            { pattern: /process\.env\.GEO_LAT/g, value: config.GEO_LAT },
+            { pattern: /parseFloat\(process\.env\.GEO_LON\)/g, value: config.GEO_LON },
+            { pattern: /process\.env\.GEO_LON/g, value: config.GEO_LON },
+            { pattern: /process\.env\.HAXBALL_TOKEN/g, value: `"${config.HAXBALL_TOKEN}"` },
+            { pattern: /process\.env\.DISCORD_WEBHOOK/g, value: `"${config.DISCORD_WEBHOOK}"` },
+            { pattern: /process\.env\.DISCORD_CHANNEL_ID/g, value: `"${config.DISCORD_CHANNEL_ID}"` },
+            { pattern: /process\.env\.DISCORD_REPORT_ROLE_ID/g, value: `"${config.DISCORD_REPORT_ROLE_ID}"` },
+            { pattern: /process\.env\.DISCORD_INVITE/g, value: `"${config.DISCORD_INVITE}"` },
+            { pattern: /process\.env\.OWNER_PASSWORD/g, value: `"${config.OWNER_PASSWORD}"` }
+        ];
+        
+        replacements.forEach(({ pattern, value }) => {
+            const matches = configuredScript.match(pattern);
+            if (matches) {
+                logger.info(`Replacing ${matches.length} instances of ${pattern.source}`);
+                configuredScript = configuredScript.replace(pattern, value);
+            }
+        });
+        
+        // Final check for any remaining process.env references
+        const remainingProcessEnv = configuredScript.match(/process\.env/g);
+        if (remainingProcessEnv) {
+            logger.warn(`Found ${remainingProcessEnv.length} remaining process.env references`);
+            // Replace any remaining process.env with empty object to prevent errors
+            configuredScript = configuredScript.replace(/process\.env/g, '{}');
+        }
 
         // Inject tournament script
         await page.evaluate(configuredScript);
